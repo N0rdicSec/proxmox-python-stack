@@ -16,8 +16,8 @@ echo "██╔═══╝   ╚██╔╝     ██║   ██╔══█
 echo "██║        ██║      ██║   ██║  ██║╚██████╔╝██║ ╚████║    ███████║   ██║   ██║  ██║╚██████╗██║  ██╗"
 echo "╚═╝        ╚═╝      ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝    ╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝"
 echo "=================================================================================================="
-echo "⬇️🚀🚀Idealized by Dereck 🚀🚀⬇️"
-echo "Made by ChatGTP, Claude, Manus and polished on Z.ai"                                                                                                  
+echo "⬇️🚀🚀 Made by Dereck and polished on Z.ai 🚀🚀⬇️"
+echo ""                                                                                                  
 echo "=================================================================================================="
 echo ""
 echo "🚀 Setting up DevLab stack on Ubuntu 22.04 LXC..."
@@ -192,7 +192,7 @@ GITEA_SECRET_KEY=${GITEA_SECRET_KEY}
 GITEA_INTERNAL_TOKEN=${GITEA_INTERNAL_TOKEN}
 
 # pgAdmin Configuration
-PGADMIN_DEFAULT_EMAIL=odin@thor.home
+PGADMIN_DEFAULT_EMAIL=admin@pgadmin.local
 PGADMIN_DEFAULT_PASSWORD=${PGADMIN_DEFAULT_PASSWORD}
 
 # Code Server Configuration
