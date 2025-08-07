@@ -166,7 +166,7 @@ fi
 
 # Generate random passwords first
 echo "🎲 Generating secure passwords..."
-POSTGRES_PASSWORD="giteapass_$(openssl rand -hex 8)"
+POSTGRES_PASSWORD="postgrespass_$(openssl rand -hex 8)"
 GITEA_DB_PASSWORD="giteapass_$(openssl rand -hex 8)"
 NPM_DB_PASSWORD="npm_db_$(openssl rand -hex 8)"
 PGADMIN_DEFAULT_PASSWORD="pgadmin_$(openssl rand -hex 8)"
@@ -174,6 +174,7 @@ VSCODE_PASSWORD="vscode_$(openssl rand -hex 8)"
 REDIS_PASSWORD="redis_$(openssl rand -hex 8)"
 GITEA_SECRET_KEY=$(openssl rand -hex 32)
 GITEA_INTERNAL_TOKEN=$(openssl rand -hex 32)
+FASTAPI_PASSWORD="fastapi_$(openssl rand -hex 8)"
 
 # Create .env file with secure passwords
 echo "🔑 Creating environment configuration..."
@@ -207,6 +208,10 @@ REDIS_PASSWORD=${REDIS_PASSWORD}
 NPM_DB_USER=npm
 NPM_DB_PASSWORD=${NPM_DB_PASSWORD}
 NPM_DB_NAME=npm
+
+#FASTAPI Configuration
+FASTAPI_user=admin
+FASTAPI_PASSWORD=${FASTAPI_PASSWORD}
 EOF
 
 # Set proper permissions for .env file
@@ -253,12 +258,84 @@ ENV PATH=$PATH:/home/coder/.local/bin
 USER coder
 EOF
 
+# Create FastAPI Dockerfile
+echo "📝 Creating FastAPI Dockerfile..."
+mkdir -p fastapi
+cat <<'EOF' > fastapi/Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+EOF
+
+# Create a basic requirements.txt for FastAPI
+echo "📝 Creating FastAPI requirements.txt..."
+cat <<'EOF' > fastapi/requirements.txt
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+python-multipart==0.0.6
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-dotenv==1.0.0
+EOF
+
+# Create a basic FastAPI app
+echo "📝 Creating basic FastAPI app..."
+cat <<'EOF' > fastapi/main.py
+from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from pydantic import BaseModel
+import secrets
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = FastAPI(title="DevLab API", version="1.0.0")
+
+security = HTTPBasic()
+
+def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = secrets.compare_digest(credentials.username, os.getenv("API_USER", "admin"))
+    correct_password = secrets.compare_digest(credentials.password, os.getenv("API_PASSWORD", ${FASTAPI_PASSWORD}))
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to Python Stack API"}
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
+
+@app.get("/secure-data", dependencies=[Depends(get_current_username)])
+def read_secure_data():
+    return {"message": "This is secure data"}
+EOF
+
 # Create updated Docker Compose file with latest versions and LXC optimizations
 echo "📝 Creating Docker Compose configuration..."
 cat <<'EOF' > docker-compose.yml
 services:
   vscode:
-    build: ./vscode
+    build: 
+      context: ./vscode
+      dockerfile: Dockerfile
     container_name: vscode
     ports:
       - "8080:8080"
@@ -284,7 +361,9 @@ services:
       /usr/bin/code-server --bind-addr 0.0.0.0:8080 --auth password"
 
   fastapi:
-    build: ./fastapi
+    build: 
+      context: ./fastapi
+      dockerfile: Dockerfile
     container_name: fastapi
     ports:
       - "8000:8000"
@@ -510,9 +589,15 @@ if [ ! -f .vscode_build_hash ] || ! sha256sum -c .vscode_build_hash --status 2>/
 else
     echo "✅ VS Code Dockerfile unchanged. Skipping rebuild."
 fi
-
-#Move the dockerfile created at the begining
-mv /opt/docker/python-stack/vscode/Dockerfile /opt/docker/python-stack/
+echo ""
+echo "🔍 Checking if FastAPI Dockerfile has changed..."
+if [ ! -f .fastapi_build_hash ] || ! sha256sum -c .fastapi_build_hash --status 2>/dev/null; then
+    echo "📦 FastAPI Dockerfile changed or no previous build found. Rebuilding..."
+    docker compose build fastapi
+    sha256sum fastapi/Dockerfile > .fastapi_build_hash
+else
+    echo "✅ FastAPI Dockerfile unchanged. Skipping rebuild."
+fi
 
 echo "🚀 Starting DevLab services..."
 docker compose up -d
@@ -531,20 +616,29 @@ LXC_IP=$(hostname -I | awk '{print $1}')
 echo ""
 echo "✅ DevLab stack deployed successfully!"
 echo "======================================"
-echo "🔑 Credentials saved in .env file - keep this secure!"
+echo " 🔑 Credentials saved in .env file - keep this secure!"
 echo ""
-echo "📋 Access Information:"
+echo " 📋 Access Information:"
+echo ""
+echo " ✨ FastAPI: http://${LXC_IP}:8000"
+echo " 🧲 FastAPI Login: $(grep FASTAPI_PASSWORD .env | cut -d'=' -f2)"
+echo ""
 echo " 📊 Nginx Proxy Manager: http://${LXC_IP}:81"
 echo " 🔐 DB Password: $(grep NPM_DB_PASSWORD .env | cut -d'=' -f2)"
+echo ""
 echo " 💻 VS Code:      http://${LXC_IP}:8080"
 echo "    Password: $(grep VSCODE_PASSWORD .env | cut -d'=' -f2)"
-echo " 🗂️  Gitea:        http://${LXC_IP}:3000"
-echo "    (Complete setup wizard on first visit)"
-echo " 🗄️  pgAdmin:      http://${LXC_IP}:5050"
+echo ""
+echo " 🗂️ Gitea:        http://${LXC_IP}:3000"
+echo "    (>>>> Complete setup wizard on first visit <<<<)"
+echo ""
+echo " 🗄️ pgAdmin:      http://${LXC_IP}:5050"
 echo "    Email: $(grep PGADMIN_DEFAULT_EMAIL .env | cut -d'=' -f2)"
 echo "    Password: $(grep PGADMIN_DEFAULT_PASSWORD .env | cut -d'=' -f2)"
+echo ""
 echo " 🔄 Redis:        ${LXC_IP}:6379"
 echo "    Password: $(grep REDIS_PASSWORD .env | cut -d'=' -f2)"
+echo ""
 echo " 🐘 PostgreSQL:   ${LXC_IP}:5432"
 echo "    User: $(grep POSTGRES_USER .env | cut -d'=' -f2)"
 echo "    Password: $(grep POSTGRES_PASSWORD .env | cut -d'=' -f2)"
@@ -561,4 +655,4 @@ echo "   - Configure firewall rules as needed"
 echo "   - Consider enabling SSL/TLS for external access"
 echo ""
 echo "🏁 Setup complete! Happy coding!"
-echo "✅ Created by Dereck!"
+echo "✅ Created by 0din!"
