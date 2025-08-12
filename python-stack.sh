@@ -17,7 +17,8 @@ echo "██║        ██║      ██║   ██║  ██║╚██�
 echo "╚═╝        ╚═╝      ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝    ╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝"
 echo "=================================================================================================="
 echo "⬇️🚀🚀 Made by 0din and polished on Z.ai 🚀🚀⬇️"
-echo ""                                                                                                  
+echo "[Docker | Python | Code-Server(VsCode Web) | FastAPI |"
+echo "Postgres | pgAdmin | Radis | Nginx Proxy Manager | Gitea ]"                                                                                                  
 echo "=================================================================================================="
 echo ""
 echo "🚀 Setting up DevLab stack on Ubuntu 22.04 LXC..."
@@ -247,10 +248,8 @@ RUN code-server --install-extension ms-python.python \
     && code-server --install-extension hbenl.vscode-test-explorer \
     && code-server --install-extension gitlab.gitlab-workflow \
     && code-server --install-extension github.vscode-pull-request-github \
-    && code-server --install-extension github.vscode-github-actions  
-# && code-server --install-extension ms-python.vscode-pylance \
-# && code-server --install-extension gitea.vscode-gitea \
-
+    && code-server --install-extension github.vscode-github-actions
+    
 # Set up the environment
 ENV PATH=$PATH:/home/coder/.local/bin
 
