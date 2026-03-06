@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-echo ""
+
 echo ""
 echo "███╗   ███╗██╗   ██╗    ███████╗ █████╗ ██╗   ██╗ ██████╗ ██╗   ██╗██████╗ ██╗████████╗███████╗   "
 echo "████╗ ████║╚██╗ ██╔╝    ██╔════╝██╔══██╗██║   ██║██╔═══██╗██║   ██║██╔══██╗██║╚══██╔══╝██╔════╝   "
@@ -8,7 +8,7 @@ echo "██╔████╔██║ ╚████╔╝     ████�
 echo "██║╚██╔╝██║  ╚██╔╝      ██╔══╝  ██╔══██║╚██╗ ██╔╝██║   ██║██║   ██║██╔══██╗██║   ██║   ██╔══╝     "
 echo "██║ ╚═╝ ██║   ██║       ██║     ██║  ██║ ╚████╔╝ ╚██████╔╝╚██████╔╝██║  ██║██║   ██║   ███████╗   "
 echo "╚═╝     ╚═╝   ╚═╝       ╚═╝     ╚═╝  ╚═╝  ╚═══╝   ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝   ╚═╝   ╚══════╝   "
-echo "                                                                                                  "
+echo "                                                                                                   "
 echo "██████╗ ██╗   ██╗████████╗██╗  ██╗ ██████╗ ███╗   ██╗    ███████╗████████╗ █████╗  ██████╗██╗  ██╗"
 echo "██╔══██╗╚██╗ ██╔╝╚══██╔══╝██║  ██║██╔═══██╗████╗  ██║    ██╔════╝╚══██╔══╝██╔══██╗██╔════╝██║ ██╔╝"
 echo "██████╔╝ ╚████╔╝    ██║   ███████║██║   ██║██╔██╗ ██║    ███████╗   ██║   ███████║██║     █████╔╝ "
@@ -16,95 +16,106 @@ echo "██╔═══╝   ╚██╔╝     ██║   ██╔══█
 echo "██║        ██║      ██║   ██║  ██║╚██████╔╝██║ ╚████║    ███████║   ██║   ██║  ██║╚██████╗██║  ██╗"
 echo "╚═╝        ╚═╝      ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝    ╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝"
 echo "=================================================================================================="
-echo "⬇️🚀🚀 Made by 0din - With the fluff things added by AI. 🚀🚀⬇️"
-echo "[Docker | Python | Code-Server(VsCode Web) | FastAPI |"
-echo "Postgres | pgAdmin | Radis | Nginx Proxy Manager | Gitea ]"                                                                                                  
+echo "⬇️🚀🚀 Made by 0din 🚀🚀⬇️"
+echo "[Docker | Python 3.12 | Code-Server(VsCode Web) | FastAPI |"
+echo "Postgres 17 | pgAdmin 9 | Redis 7 | Nginx Proxy Manager | Gitea 1.25]"
 echo "=================================================================================================="
 echo ""
-echo "🚀 Setting up DevLab stack on Ubuntu 22.04 LXC..."
+echo "🚀 Setting up DevLab stack on Ubuntu 24.04 LXC..."
 
-# Check if running as root or with sudo
-if [ "$EUID" -ne 0 ]; then
+# ─────────────────────────────────────────────────────────────
+# Image versions — update these to bump the stack
+# ─────────────────────────────────────────────────────────────
+POSTGRES_VERSION="17"
+PGADMIN_VERSION="9.13.0"
+GITEA_VERSION="1.25.3"
+ACT_RUNNER_VERSION="0.3.0"
+REDIS_VERSION="7.4-alpine"
+NPM_VERSION="latest"   # jc21/nginx-proxy-manager has no stable semver tag
+
+# ─────────────────────────────────────────────────────────────
+# Root / user-mode guard
+# ─────────────────────────────────────────────────────────────
+USER_MODE=false
+if [ "$1" = "--user-mode" ]; then
+    USER_MODE=true
+    echo "🔧 Running in user mode — skipping system setup"
+elif [ "$EUID" -ne 0 ]; then
     echo "❌ This script requires root privileges for system setup."
     echo "Please run with sudo:"
     echo "  sudo $0"
     echo ""
-    echo "Or if you want to skip system setup and only deploy the stack:"
+    echo "Or to skip system setup and only deploy the stack:"
     echo "  $0 --user-mode"
     exit 1
 fi
 
-# Check for user-mode flag
-USER_MODE=false
-if [ "$1" = "--user-mode" ]; then
-    USER_MODE=true
-    echo "🔧 Running in user mode - skipping system setup"
+# ─────────────────────────────────────────────────────────────
+# Determine which real user invoked sudo (for docker group)
+# ─────────────────────────────────────────────────────────────
+REAL_USER="${SUDO_USER:-}"
+if [ -z "$REAL_USER" ] || [ "$REAL_USER" = "root" ]; then
+    # Running as root directly — fall back to 'ubuntu' if it exists, else root
+    if id "ubuntu" &>/dev/null; then
+        REAL_USER="ubuntu"
+    else
+        REAL_USER="root"
+    fi
 fi
 
-# System setup (only if not in user mode)
+# ─────────────────────────────────────────────────────────────
+# System setup (root mode only)
+# ─────────────────────────────────────────────────────────────
 if [ "$USER_MODE" = false ]; then
-    # Update system
+
     echo "📦 Updating system packages..."
-    apt update && apt upgrade -y
+    apt-get update && apt-get upgrade -y
 
-    # Install dependencies
     echo "🔧 Installing dependencies..."
-    apt install -y curl wget git apt-transport-https ca-certificates gnupg lsb-release software-properties-common
+    apt-get install -y \
+        curl wget git \
+        apt-transport-https ca-certificates gnupg lsb-release \
+        software-properties-common openssl
 
-    # Install Docker (Ubuntu repository method - more reliable for LXC)
+    # ── Docker ──────────────────────────────────────────────
     echo "🐳 Installing Docker..."
-    # Remove any old Docker packages
-    apt remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+    apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
 
-    # Add Docker's official GPG key and repository for Ubuntu
     install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+        | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
     chmod a+r /etc/apt/keyrings/docker.gpg
 
-    # Add Docker repository for Ubuntu (not Debian)
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
         > /etc/apt/sources.list.d/docker.list
 
-    # Update package index and install Docker
-    apt update
-    apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    apt-get update
+    apt-get install -y \
+        docker-ce docker-ce-cli containerd.io \
+        docker-buildx-plugin docker-compose-plugin
 
-    # Configure Docker for LXC environment
+    # ── Docker daemon config for LXC ────────────────────────
     echo "⚙️  Configuring Docker for LXC..."
-    # Create Docker daemon configuration for LXC compatibility
     mkdir -p /etc/docker
-    cat > /etc/docker/daemon.json <<EOF
+    # Note: no custom DNS — Docker inherits the host's resolv.conf,
+    # which is correct for Proxmox LXC environments.
+    cat > /etc/docker/daemon.json <<'DAEMON_EOF'
 {
   "storage-driver": "overlay2",
   "log-driver": "json-file",
   "log-opts": {
     "max-size": "10m",
     "max-file": "3"
-  },
-  "dns": ["10.0.0.1", "192.168.2.1", "45.90.28.184"]
+  }
 }
-EOF
+DAEMON_EOF
 
-    # Enable and start Docker
-    systemctl enable docker
-    systemctl start docker
-
-    # Add docker user to docker group
-    if id "docker" &>/dev/null; then
-        usermod -aG docker docker
-        echo "✅ Added 'docker' user to docker group"
-    fi
-
-    # LXC-specific optimizations
-    echo "🏗️  Applying LXC optimizations..."
-    # Ensure proper cgroup permissions for Docker in LXC
+    # ── cgroup v2 / LXC service override (applied once) ─────
     if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
-        echo "Detected cgroup v2, ensuring proper Docker configuration..."
-        # Modern LXC with cgroup v2 - create override directory and service file
+        echo "🏗️  Detected cgroup v2 — applying Docker service override..."
         mkdir -p /etc/systemd/system/docker.service.d
-        
-        # Create override configuration for Docker service
-        cat > /etc/systemd/system/docker.service.d/override.conf <<'EOF'
+        cat > /etc/systemd/system/docker.service.d/override.conf <<'OVERRIDE_EOF'
 [Unit]
 Description=Docker Application Container Engine
 Documentation=https://docs.docker.com
@@ -114,6 +125,7 @@ Requires=docker.socket containerd.service
 
 [Service]
 Type=notify
+# Clear the default ExecStart before overriding it
 ExecStart=
 ExecStart=/usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock
 ExecReload=/bin/kill -s HUP $MAINPID
@@ -132,44 +144,55 @@ OOMScoreAdjust=-500
 
 [Install]
 WantedBy=multi-user.target
-EOF
-        
-        # Reload systemd to pick up the changes
+OVERRIDE_EOF
         systemctl daemon-reload
-        echo "✅ Applied Docker service optimizations for cgroup v2"
+        echo "✅ cgroup v2 override applied"
     fi
 
-    # Verify Docker installation
+    systemctl enable docker
+    systemctl start docker
+
+    # Add the invoking user to the docker group
+    if [ "$REAL_USER" != "root" ] && id "$REAL_USER" &>/dev/null; then
+        usermod -aG docker "$REAL_USER"
+        echo "✅ Added '$REAL_USER' to docker group (re-login required to take effect)"
+    fi
+
     echo "✅ Verifying Docker installation..."
     docker --version
     docker compose version
 
-    # Create project directory in system location
     echo "📁 Creating project structure..."
-    mkdir -p /opt/docker/python-stack
-    chown -R docker:docker /opt/docker/python-stack
     PROJECT_DIR="/opt/docker/python-stack"
+    mkdir -p "$PROJECT_DIR"
+    if [ "$REAL_USER" != "root" ]; then
+        chown -R "$REAL_USER":"$REAL_USER" "$PROJECT_DIR"
+    fi
+
 else
-    # User mode - create project in user's home directory
-    echo "📁 Creating project structure in user directory..."
     PROJECT_DIR="$HOME/docker/python-stack"
     mkdir -p "$PROJECT_DIR"
 fi
 
-# Switch to project directory
 cd "$PROJECT_DIR"
 
-# Create the external network if it doesn't exist
-echo "🌐 Creating external network..."
+# ─────────────────────────────────────────────────────────────
+# External Docker network
+# ─────────────────────────────────────────────────────────────
+echo "🌐 Creating external Docker network..."
 if ! docker network inspect devlab-network >/dev/null 2>&1; then
     docker network create --subnet=172.20.0.0/16 devlab-network
+    echo "✅ Network 'devlab-network' created"
+else
+    echo "✅ Network 'devlab-network' already exists"
 fi
 
-# Generate random passwords first
+# ─────────────────────────────────────────────────────────────
+# Generate secure passwords
+# ─────────────────────────────────────────────────────────────
 echo "🎲 Generating secure passwords..."
 POSTGRES_PASSWORD="postgrespass_$(openssl rand -hex 8)"
 GITEA_DB_PASSWORD="giteapass_$(openssl rand -hex 8)"
-NPM_DB_PASSWORD="npm_db_$(openssl rand -hex 8)"
 PGADMIN_DEFAULT_PASSWORD="pgadmin_$(openssl rand -hex 8)"
 VSCODE_PASSWORD="vscode_$(openssl rand -hex 8)"
 REDIS_PASSWORD="redis_$(openssl rand -hex 8)"
@@ -177,66 +200,83 @@ GITEA_SECRET_KEY=$(openssl rand -hex 32)
 GITEA_INTERNAL_TOKEN=$(openssl rand -hex 32)
 FASTAPI_PASSWORD="fastapi_$(openssl rand -hex 8)"
 
-# Create .env file with secure passwords
-echo "🔑 Creating environment configuration..."
+# ─────────────────────────────────────────────────────────────
+# Write .env (consistent naming, 600 permissions)
+# ─────────────────────────────────────────────────────────────
+echo "🔑 Writing environment configuration..."
 cat > .env <<EOF
-# Database Configuration
-POSTGRES_USER=venus
+# ── PostgreSQL (shared instance) ──────────────────────────
+POSTGRES_USER=devlab
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 POSTGRES_DB=gitea
 
-# Gitea Configuration
+# ── Gitea ─────────────────────────────────────────────────
 GITEA_DB_USER=gitea
 GITEA_DB_PASSWORD=${GITEA_DB_PASSWORD}
 GITEA_DB_NAME=gitea
 GITEA_SECRET_KEY=${GITEA_SECRET_KEY}
 GITEA_INTERNAL_TOKEN=${GITEA_INTERNAL_TOKEN}
 
-# pgAdmin Configuration
+# ── pgAdmin ───────────────────────────────────────────────
 PGADMIN_DEFAULT_EMAIL=admin@pgadmin.local
 PGADMIN_DEFAULT_PASSWORD=${PGADMIN_DEFAULT_PASSWORD}
 
-# Code Server Configuration
+# ── VS Code Server ────────────────────────────────────────
 VSCODE_PASSWORD=${VSCODE_PASSWORD}
 
-# Gitea Runner Configuration
-GITEA_RUNNER_TOKEN=
-
-# Redis Configuration
+# ── Redis ─────────────────────────────────────────────────
 REDIS_PASSWORD=${REDIS_PASSWORD}
 
-# Nginx Proxy Manager Database Configuration
-NPM_DB_USER=npm
-NPM_DB_PASSWORD=${NPM_DB_PASSWORD}
-NPM_DB_NAME=npm
-
-#FASTAPI Configuration
-FASTAPI_user=admin
+# ── FastAPI ───────────────────────────────────────────────
+FASTAPI_USER=admin
 FASTAPI_PASSWORD=${FASTAPI_PASSWORD}
+
+# ── Gitea Actions Runner ──────────────────────────────────
+# Fill this in after completing the Gitea setup wizard, then
+# run: docker compose up -d gitea-runner
+GITEA_RUNNER_TOKEN=
 EOF
-
-# Set proper permissions for .env file
 chmod 600 .env
+echo "✅ .env written (permissions: 600)"
 
-# Create directories for persistent storage
-echo "📂 Creating storage directories..."
-mkdir -p code gitea postgres pgadmin gitea-runner redis npm_db fastapi vscode
+# ─────────────────────────────────────────────────────────────
+# Persistent storage directories
+# ─────────────────────────────────────────────────────────────
+echo "📂 Creating persistent storage directories..."
+mkdir -p \
+    code \
+    gitea \
+    postgres \
+    pgadmin \
+    gitea-runner \
+    redis \
+    npm/data \
+    npm/letsencrypt \
+    fastapi \
+    vscode
 
-# Create VS Code Dockerfile
-echo "📝 Creating VS Code Dockerfile..."
-mkdir -p vscode
-cat <<'EOF' > vscode/Dockerfile
+# pgAdmin's data directory must be writable by uid 5050 inside the container
+chmod 777 pgadmin
+echo "✅ Directories created (pgadmin dir chmod 777)"
+
+# ─────────────────────────────────────────────────────────────
+# VS Code Server — Dockerfile
+# ─────────────────────────────────────────────────────────────
+echo "📝 Writing VS Code Dockerfile..."
+cat > vscode/Dockerfile <<'VSCODE_EOF'
 FROM codercom/code-server:latest
 
 USER root
 
-# Install Python and pip
+# Install Python 3.12, pip, and dev tools
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
+    python3-venv \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python extensions
+# Install VS Code extensions useful for Python development
 RUN code-server --install-extension ms-python.python \
     && code-server --install-extension ms-toolsai.jupyter \
     && code-server --install-extension ms-python.black-formatter \
@@ -249,19 +289,18 @@ RUN code-server --install-extension ms-python.python \
     && code-server --install-extension gitlab.gitlab-workflow \
     && code-server --install-extension github.vscode-pull-request-github \
     && code-server --install-extension github.vscode-github-actions
-    
-# Set up the environment
+
 ENV PATH=$PATH:/home/coder/.local/bin
 
-# Switch back to the coder user
 USER coder
-EOF
+VSCODE_EOF
 
-# Create FastAPI Dockerfile
-echo "📝 Creating FastAPI Dockerfile..."
-mkdir -p fastapi
-cat <<'EOF' > fastapi/Dockerfile
-FROM python:3.11-slim
+# ─────────────────────────────────────────────────────────────
+# FastAPI — Dockerfile
+# ─────────────────────────────────────────────────────────────
+echo "📝 Writing FastAPI Dockerfile..."
+cat > fastapi/Dockerfile <<'FASTAPI_DOCKERFILE_EOF'
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -270,43 +309,57 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-EOF
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+FASTAPI_DOCKERFILE_EOF
 
-# Create a basic requirements.txt for FastAPI
-echo "📝 Creating FastAPI requirements.txt..."
-cat <<'EOF' > fastapi/requirements.txt
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.0
-sqlalchemy==2.0.23
-psycopg2-binary==2.9.9
-python-multipart==0.0.6
-python-jose[cryptography]==3.3.0
+# ─────────────────────────────────────────────────────────────
+# FastAPI — requirements.txt
+# ─────────────────────────────────────────────────────────────
+echo "📝 Writing FastAPI requirements.txt..."
+cat > fastapi/requirements.txt <<'REQS_EOF'
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+pydantic==2.11.1
+sqlalchemy==2.0.40
+psycopg2-binary==2.9.10
+python-multipart==0.0.20
+python-jose[cryptography]==3.4.0
 passlib[bcrypt]==1.7.4
-python-dotenv==1.0.0
-EOF
+python-dotenv==1.1.0
+REQS_EOF
 
-# Create a basic FastAPI app
-echo "📝 Creating basic FastAPI app..."
-cat <<'EOF' > fastapi/main.py
+# ─────────────────────────────────────────────────────────────
+# FastAPI — main.py
+# Credentials come entirely from environment variables — no
+# defaults are embedded in the source file for security.
+# ─────────────────────────────────────────────────────────────
+echo "📝 Writing FastAPI main.py..."
+cat > fastapi/main.py <<'FASTAPI_APP_EOF'
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 import secrets
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 app = FastAPI(title="DevLab API", version="1.0.0")
-
 security = HTTPBasic()
 
-def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
-    correct_username = secrets.compare_digest(credentials.username, os.getenv("API_USER", "admin"))
-    correct_password = secrets.compare_digest(credentials.password, os.getenv("API_PASSWORD", ${FASTAPI_PASSWORD}))
-    if not (correct_username and correct_password):
+
+def get_current_username(credentials: HTTPBasicCredentials = Depends(security)) -> str:
+    """Validate HTTP Basic credentials against environment-supplied values."""
+    api_user = os.environ.get("FASTAPI_USER", "")
+    api_pass = os.environ.get("FASTAPI_PASSWORD", "")
+
+    if not api_user or not api_pass:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="API credentials not configured",
+        )
+
+    username_ok = secrets.compare_digest(credentials.username, api_user)
+    password_ok = secrets.compare_digest(credentials.password, api_pass)
+
+    if not (username_ok and password_ok):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -314,25 +367,67 @@ def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
         )
     return credentials.username
 
+
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to Python Stack API"}
+    return {"message": "Welcome to the DevLab Python Stack API"}
+
 
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
 
+
 @app.get("/secure-data", dependencies=[Depends(get_current_username)])
 def read_secure_data():
-    return {"message": "This is secure data"}
-EOF
+    return {"message": "You have accessed secured data successfully"}
+FASTAPI_APP_EOF
 
-# Create updated Docker Compose file with latest versions and LXC optimizations
-echo "📝 Creating Docker Compose configuration..."
-cat <<'EOF' > docker-compose.yml
+# ─────────────────────────────────────────────────────────────
+# Postgres init script — creates all databases in one instance
+# ─────────────────────────────────────────────────────────────
+echo "📝 Writing Postgres init script..."
+mkdir -p postgres-init
+
+# POSTGRES_USER and POSTGRES_DB are expanded at runtime from the
+# container's own environment variables, so this file uses the
+# shell-style $VAR syntax that the postgres entrypoint expects.
+cat > postgres-init/01-init.sh <<'PGINIT_EOF'
+#!/bin/bash
+set -e
+
+# Create the Gitea database and dedicated user
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-SQL
+    CREATE USER gitea WITH PASSWORD '${GITEA_DB_PASSWORD}';
+    CREATE DATABASE gitea OWNER gitea;
+    GRANT ALL PRIVILEGES ON DATABASE gitea TO gitea;
+SQL
+PGINIT_EOF
+chmod +x postgres-init/01-init.sh
+
+# The init script needs the Gitea password at runtime — write a
+# companion env file that docker compose will pick up automatically.
+# (The .env file already contains GITEA_DB_PASSWORD so nothing extra
+#  is needed; the compose file passes it through to the init script.)
+
+# ─────────────────────────────────────────────────────────────
+# Docker Compose
+# ─────────────────────────────────────────────────────────────
+echo "📝 Writing docker-compose.yml..."
+
+# Write the compose file using a regular (double-quoted) heredoc so
+# that the VERSION variables from this script expand correctly.
+# Dollar signs that must reach the compose runtime are escaped (\$).
+cat > docker-compose.yml <<COMPOSE_EOF
+# DevLab Python Stack — docker-compose.yml
+# Generated by setup-devlab.sh
+# Image versions: Gitea ${GITEA_VERSION} | pgAdmin ${PGADMIN_VERSION} | Postgres ${POSTGRES_VERSION} | Redis ${REDIS_VERSION}
+
 services:
+
+  # ── VS Code Server ────────────────────────────────────────
   vscode:
-    build: 
+    build:
       context: ./vscode
       dockerfile: Dockerfile
     container_name: vscode
@@ -341,62 +436,130 @@ services:
     volumes:
       - ./code:/home/coder/project
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ~/.ssh:/home/coder/.ssh:ro
     environment:
-      - PASSWORD=${VSCODE_PASSWORD}
-      - SUDO_PASSWORD=${VSCODE_PASSWORD}
+      - PASSWORD=\${VSCODE_PASSWORD}
+      - SUDO_PASSWORD=\${VSCODE_PASSWORD}
     restart: unless-stopped
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - devlab-network
     user: root
-    command: bash -c "\
-      if [ ! -f /home/coder/.ssh/id_rsa ]; then \
-        ssh-keygen -t rsa -b 4096 -f /home/coder/.ssh/id_rsa -N '' && \
-        chmod 600 /home/coder/.ssh/id_rsa && \
-        chmod 644 /home/coder/.ssh/id_rsa.pub; \
-      fi && \
-      /usr/bin/code-server --bind-addr 0.0.0.0:8080 --auth password"
+    command: >
+      bash -c "
+        if [ ! -f /home/coder/.ssh/id_ed25519 ]; then
+          mkdir -p /home/coder/.ssh &&
+          ssh-keygen -t ed25519 -f /home/coder/.ssh/id_ed25519 -N '' &&
+          chmod 700 /home/coder/.ssh &&
+          chmod 600 /home/coder/.ssh/id_ed25519 &&
+          chmod 644 /home/coder/.ssh/id_ed25519.pub;
+        fi &&
+        /usr/bin/code-server --bind-addr 0.0.0.0:8080 --auth password
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
+  # ── FastAPI ───────────────────────────────────────────────
   fastapi:
-    build: 
+    build:
       context: ./fastapi
       dockerfile: Dockerfile
     container_name: fastapi
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - DATABASE_URL=postgresql://\${POSTGRES_USER}:\${POSTGRES_PASSWORD}@postgres:5432/\${POSTGRES_DB}
+      - FASTAPI_USER=\${FASTAPI_USER}
+      - FASTAPI_PASSWORD=\${FASTAPI_PASSWORD}
     volumes:
       - ./fastapi:/app
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - devlab-network
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
 
+  # ── PostgreSQL (shared instance) ─────────────────────────
+  postgres:
+    image: postgres:${POSTGRES_VERSION}
+    container_name: postgres
+    environment:
+      - POSTGRES_USER=\${POSTGRES_USER}
+      - POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}
+      - POSTGRES_DB=\${POSTGRES_DB}
+      - GITEA_DB_PASSWORD=\${GITEA_DB_PASSWORD}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --lc-collate=C --lc-ctype=C
+    restart: unless-stopped
+    volumes:
+      - ./postgres:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \${POSTGRES_USER} -d \${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - devlab-network
+
+  # ── pgAdmin 4 ─────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:${PGADMIN_VERSION}
+    container_name: pgadmin
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=\${PGADMIN_DEFAULT_EMAIL}
+      - PGADMIN_DEFAULT_PASSWORD=\${PGADMIN_DEFAULT_PASSWORD}
+      - PGADMIN_CONFIG_SERVER_MODE=False
+      - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=False
+    ports:
+      - "5050:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./pgadmin:/var/lib/pgadmin
+    restart: unless-stopped
+    networks:
+      - devlab-network
+    healthcheck:
+      test: ["CMD", "wget", "-O", "-", "http://localhost:80/misc/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ── Gitea ─────────────────────────────────────────────────
   gitea:
-    image: gitea/gitea:1.22.1
+    image: gitea/gitea:${GITEA_VERSION}
     container_name: gitea
     environment:
       - USER_UID=1000
       - USER_GID=1000
       - GITEA__database__DB_TYPE=postgres
       - GITEA__database__HOST=postgres:5432
-      - GITEA__database__NAME=${GITEA_DB_NAME}
-      - GITEA__database__USER=${GITEA_DB_USER}
-      - GITEA__database__PASSWD=${GITEA_DB_PASSWORD}
+      - GITEA__database__NAME=\${GITEA_DB_NAME}
+      - GITEA__database__USER=\${GITEA_DB_USER}
+      - GITEA__database__PASSWD=\${GITEA_DB_PASSWORD}
       - GITEA__server__DOMAIN=localhost
       - GITEA__server__SSH_DOMAIN=localhost
       - GITEA__server__ROOT_URL=http://localhost:3000/
-      - GITEA__security__SECRET_KEY=${GITEA_SECRET_KEY}
-      - GITEA__security__INTERNAL_TOKEN=${GITEA_INTERNAL_TOKEN}
+      - GITEA__security__SECRET_KEY=\${GITEA_SECRET_KEY}
+      - GITEA__security__INTERNAL_TOKEN=\${GITEA_INTERNAL_TOKEN}
+      - GITEA__actions__ENABLED=true
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -414,244 +577,215 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:3000/"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 40s
+      retries: 5
+      start_period: 60s
 
-  postgres:
-    image: postgres:16.4
-    container_name: postgres
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --lc-collate=C --lc-ctype=C
-    restart: unless-stopped
-    volumes:
-      - ./postgres:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    networks:
-      - devlab-network
-
-  pgadmin:
-    image: dpage/pgadmin4:8.10
-    container_name: pgadmin
-    environment:
-      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_DEFAULT_EMAIL}
-      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_DEFAULT_PASSWORD}
-      - PGADMIN_CONFIG_SERVER_MODE=False
-      - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=False
-    ports:
-      - "5050:80"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./pgadmin:/var/lib/pgadmin
-    restart: unless-stopped
-    networks:
-      - devlab-network
-
+  # ── Gitea Actions Runner ──────────────────────────────────
+  # The runner requires a registration token from the Gitea UI.
+  # Steps:
+  #   1. Complete the Gitea setup wizard at http://<IP>:3000
+  #   2. Go to Site Administration → Actions → Runners → Create Runner
+  #   3. Copy the token into GITEA_RUNNER_TOKEN in .env
+  #   4. Run: docker compose up -d gitea-runner
   gitea-runner:
-    image: gitea/act_runner:0.2.10
+    image: gitea/act_runner:${ACT_RUNNER_VERSION}
     container_name: gitea-runner
     depends_on:
       gitea:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./gitea-runner:/data
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - CONFIG_FILE=/data/config.yaml
       - GITEA_INSTANCE_URL=http://gitea:3000
-      - GITEA_RUNNER_REGISTRATION_TOKEN=${GITEA_RUNNER_TOKEN}
+      - GITEA_RUNNER_REGISTRATION_TOKEN=\${GITEA_RUNNER_TOKEN}
     restart: unless-stopped
     networks:
       - devlab-network
+    profiles:
+      - runner
 
-  # Optional: Redis for caching and session storage
+  # ── Redis ─────────────────────────────────────────────────
   redis:
-    image: redis:7.2.5-alpine
+    image: redis:${REDIS_VERSION}
     container_name: redis
     ports:
       - "6379:6379"
     volumes:
       - ./redis:/data
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    # Password is enforced via the requirepass argument
+    command: redis-server --appendonly yes --requirepass \${REDIS_PASSWORD}
     networks:
       - devlab-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "\${REDIS_PASSWORD}", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
-  # Optional: Nginx reverse proxy
+  # ── Nginx Proxy Manager ───────────────────────────────────
+  # Uses its built-in SQLite database — no separate DB container needed.
+  # Default login after first start: admin@example.com / changeme
   npm:
-    image: 'jc21/nginx-proxy-manager:latest'
+    image: jc21/nginx-proxy-manager:${NPM_VERSION}
     container_name: nginx-proxy-manager
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
       - "81:81"
-    environment:
-      DB_POSTGRES_HOST: 'db'
-      DB_POSTGRES_PORT: '5432'
-      DB_POSTGRES_USER: ${NPM_DB_USER}
-      DB_POSTGRES_PASSWORD: ${NPM_DB_PASSWORD}
-      DB_POSTGRES_NAME: ${NPM_DB_NAME}
     volumes:
-      - ./data:/data
-      - ./letsencrypt:/etc/letsencrypt
-    depends_on:
-      - db
+      - ./npm/data:/data
+      - ./npm/letsencrypt:/etc/letsencrypt
     networks:
       - devlab-network
-
-  db:
-    image: postgres:latest
-    container_name: npm_db
-    environment:
-      POSTGRES_USER: ${NPM_DB_USER}
-      POSTGRES_PASSWORD: ${NPM_DB_PASSWORD}
-      POSTGRES_DB: ${NPM_DB_NAME}
-    volumes:
-      - ./npm_db:/var/lib/postgresql/data
-    networks:
-      - devlab-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:81/api/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 networks:
   devlab-network:
     external: true
     name: devlab-network
+COMPOSE_EOF
 
-volumes:
-  postgres_data:
-  gitea_data:
-  redis_data:
-  npm_db:
-EOF
-
-# Set proper permissions
-echo "🔐 Setting permissions..."
-if [ "$USER_MODE" = false ]; then
-    chmod -R 755 "$PROJECT_DIR"
-    chown -R docker:docker "$PROJECT_DIR"
-else
-    chmod -R 755 "$PROJECT_DIR"
+# ─────────────────────────────────────────────────────────────
+# Permissions
+# ─────────────────────────────────────────────────────────────
+echo "🔐 Setting directory permissions..."
+if [ "$USER_MODE" = false ] && [ "$REAL_USER" != "root" ]; then
+    chown -R "$REAL_USER":"$REAL_USER" "$PROJECT_DIR"
 fi
+chmod -R 755 "$PROJECT_DIR"
+chmod 600 "$PROJECT_DIR/.env"
 
-# LXC-specific optimizations
-echo "🏗️  Applying LXC optimizations..."
-# Ensure proper cgroup permissions for Docker in LXC
-if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
-    echo "Detected cgroup v2, ensuring proper Docker configuration..."
-    # Modern LXC with cgroup v2
-        cat > /etc/systemd/system/docker.service.d/override.conf <<'EOF'
-[Unit]
-Description=Docker Application Container Engine
-Documentation=https://docs.docker.com
-After=network-online.target docker.socket firewalld.service containerd.service time-set.target
-Wants=network-online.target containerd.service
-Requires=docker.socket containerd.service
-
-[Service]
-Type=notify
-ExecStart=/usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock
-ExecReload=/bin/kill -s HUP $MAINPID
-TimeoutStartSec=0
-RestartSec=2
-Restart=always
-StartLimitBurst=3
-StartLimitInterval=60s
-LimitNOFILE=infinity
-LimitNPROC=infinity
-LimitCORE=infinity
-TasksMax=infinity
-Delegate=yes
-KillMode=process
-OOMScoreAdjust=-500
-
-[Install]
-WantedBy=multi-user.target
-EOF
-fi
-
-echo "🔍 Checking if VS Code Dockerfile has changed..."
+# ─────────────────────────────────────────────────────────────
+# Build images (only if Dockerfile changed)
+# ─────────────────────────────────────────────────────────────
+echo ""
+echo "🔍 Checking VS Code Dockerfile for changes..."
 if [ ! -f .vscode_build_hash ] || ! sha256sum -c .vscode_build_hash --status 2>/dev/null; then
-    echo "📦 VS Code Dockerfile changed or no previous build found. Rebuilding..."
+    echo "📦 Rebuilding VS Code image..."
     docker compose build vscode
     sha256sum vscode/Dockerfile > .vscode_build_hash
 else
-    echo "✅ VS Code Dockerfile unchanged. Skipping rebuild."
+    echo "✅ VS Code image is up to date — skipping rebuild"
 fi
+
 echo ""
-echo "🔍 Checking if FastAPI Dockerfile has changed..."
+echo "🔍 Checking FastAPI Dockerfile for changes..."
 if [ ! -f .fastapi_build_hash ] || ! sha256sum -c .fastapi_build_hash --status 2>/dev/null; then
-    echo "📦 FastAPI Dockerfile changed or no previous build found. Rebuilding..."
+    echo "📦 Rebuilding FastAPI image..."
     docker compose build fastapi
     sha256sum fastapi/Dockerfile > .fastapi_build_hash
 else
-    echo "✅ FastAPI Dockerfile unchanged. Skipping rebuild."
+    echo "✅ FastAPI image is up to date — skipping rebuild"
 fi
 
+# ─────────────────────────────────────────────────────────────
+# Start the stack (runner excluded — needs token first)
+# ─────────────────────────────────────────────────────────────
+echo ""
 echo "🚀 Starting DevLab services..."
+echo "   (The Gitea runner is excluded — see instructions below)"
 docker compose up -d
 
-# Wait for services to be ready
-echo "⏳ Waiting for services to start..."
-sleep 30
+# ─────────────────────────────────────────────────────────────
+# Wait for services to become healthy (replaces bare sleep 30)
+# ─────────────────────────────────────────────────────────────
+echo ""
+echo "⏳ Waiting for all services to report healthy..."
+TIMEOUT=120
+ELAPSED=0
+INTERVAL=5
+while true; do
+    UNHEALTHY=$(docker compose ps --format json 2>/dev/null \
+        | grep -c '"Health":"starting"' || true)
+    if [ "$UNHEALTHY" -eq 0 ]; then
+        break
+    fi
+    if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
+        echo "⚠️  Timeout waiting for services. Some may still be starting."
+        break
+    fi
+    sleep "$INTERVAL"
+    ELAPSED=$((ELAPSED + INTERVAL))
+done
 
-# Display service status
+# ─────────────────────────────────────────────────────────────
+# Summary
+# ─────────────────────────────────────────────────────────────
+echo ""
 echo "📊 Service Status:"
 docker compose ps
 
-# Get LXC IP address
 LXC_IP=$(hostname -I | awk '{print $1}')
 
 echo ""
-echo "✅ DevLab stack deployed successfully!"
-echo "======================================"
-echo " 🔑 Credentials saved in .env file - keep this secure!"
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║           ✅  DevLab Stack Deployed Successfully         ║"
+echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
-echo " 📋 Access Information:"
+echo "  🌐 Host IP : ${LXC_IP}"
 echo ""
-echo " ✨ FastAPI: http://${LXC_IP}:8000"
-echo " 🧲 FastAPI Login: $(grep FASTAPI_PASSWORD .env | cut -d'=' -f2)"
+echo "  💻 VS Code Server     → http://${LXC_IP}:8080"
+echo "     Password           : $(grep VSCODE_PASSWORD .env | cut -d'=' -f2)"
 echo ""
-echo " 📊 Nginx Proxy Manager: http://${LXC_IP}:81"
-echo " 🔐 DB Password: $(grep NPM_DB_PASSWORD .env | cut -d'=' -f2)"
+echo "  ⚡ FastAPI             → http://${LXC_IP}:8000"
+echo "     Username           : $(grep FASTAPI_USER .env | head -1 | cut -d'=' -f2)"
+echo "     Password           : $(grep FASTAPI_PASSWORD .env | cut -d'=' -f2)"
+echo "     Docs               → http://${LXC_IP}:8000/docs"
 echo ""
-echo " 💻 VS Code:      http://${LXC_IP}:8080"
-echo "    Password: $(grep VSCODE_PASSWORD .env | cut -d'=' -f2)"
+echo "  🗂️  Gitea              → http://${LXC_IP}:3000"
+echo "     (Complete setup wizard on first visit)"
+echo "     SSH clone port     : 2222"
 echo ""
-echo " 🗂️ Gitea:        http://${LXC_IP}:3000"
-echo "    (>>>> Complete setup wizard on first visit <<<<)"
+echo "  🗄️  pgAdmin 4          → http://${LXC_IP}:5050"
+echo "     Email              : $(grep PGADMIN_DEFAULT_EMAIL .env | cut -d'=' -f2)"
+echo "     Password           : $(grep PGADMIN_DEFAULT_PASSWORD .env | cut -d'=' -f2)"
 echo ""
-echo " 🗄️ pgAdmin:      http://${LXC_IP}:5050"
-echo "    Email: $(grep PGADMIN_DEFAULT_EMAIL .env | cut -d'=' -f2)"
-echo "    Password: $(grep PGADMIN_DEFAULT_PASSWORD .env | cut -d'=' -f2)"
+echo "  🔄 Redis               → ${LXC_IP}:6379"
+echo "     Password           : $(grep REDIS_PASSWORD .env | cut -d'=' -f2)"
 echo ""
-echo " 🔄 Redis:        ${LXC_IP}:6379"
-echo "    Password: $(grep REDIS_PASSWORD .env | cut -d'=' -f2)"
+echo "  🐘 PostgreSQL          → ${LXC_IP}:5432"
+echo "     User               : $(grep POSTGRES_USER .env | cut -d'=' -f2)"
+echo "     Password           : $(grep POSTGRES_PASSWORD .env | cut -d'=' -f2)"
+echo "     Database           : $(grep POSTGRES_DB .env | cut -d'=' -f2)"
 echo ""
-echo " 🐘 PostgreSQL:   ${LXC_IP}:5432"
-echo "    User: $(grep POSTGRES_USER .env | cut -d'=' -f2)"
-echo "    Password: $(grep POSTGRES_PASSWORD .env | cut -d'=' -f2)"
-echo "    Database: $(grep POSTGRES_DB .env | cut -d'=' -f2)"
+echo "  🔁 Nginx Proxy Manager → http://${LXC_IP}:81"
+echo "     Default login      : admin@example.com / changeme"
+echo "     (Change these immediately after first login)"
 echo ""
-echo "📁 Project files are stored in: $PROJECT_DIR"
-echo "🔧 To manage services: cd $PROJECT_DIR && docker compose [up|down|restart|logs]"
-echo "🔑 To view credentials: cat $PROJECT_DIR/.env"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "⚠️  Security Notice:"
-echo "   - All passwords are auto-generated and stored in .env file"
-echo "   - Keep the .env file secure (600 permissions applied)"
-echo "   - Configure firewall rules as needed"
-echo "   - Consider enabling SSL/TLS for external access"
+echo "  🤖 Gitea Actions Runner (manual step required):"
+echo "     1. Open Gitea at http://${LXC_IP}:3000 and finish setup"
+echo "     2. Go to: Site Administration → Actions → Runners"
+echo "     3. Click 'Create Runner' and copy the token"
+echo "     4. Edit .env and set GITEA_RUNNER_TOKEN=<token>"
+echo "     5. Run: docker compose --profile runner up -d gitea-runner"
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "  📁 Project root        : $PROJECT_DIR"
+echo "  🔑 Credentials file    : $PROJECT_DIR/.env  (chmod 600)"
+echo ""
+echo "  🔧 Useful commands:"
+echo "     docker compose ps                  — check service status"
+echo "     docker compose logs -f <service>   — tail logs"
+echo "     docker compose restart <service>   — restart one service"
+echo "     docker compose down                — stop everything"
+echo ""
+echo "  ⚠️  Security reminders:"
+echo "     • Change the Nginx Proxy Manager default password immediately"
+echo "     • Keep .env secure and out of version control"
+echo "     • Configure firewall rules to restrict port exposure"
+echo "     • Use Nginx Proxy Manager to enable SSL for external access"
 echo ""
 echo "🏁 Setup complete! Happy coding!"
-echo "✅ Created by 0din!"
+echo "✅ Created by 0din — fixed and enhanced."
